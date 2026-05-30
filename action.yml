@@ -26,9 +26,9 @@ inputs:
     default: patch
   prerelease:
     description: >-
-      Optional prerelease suffix, appended as -<prerelease> (e.g.
-      beta.${{ github.run_number }}). Use for non-release builds so they can
-      never collide with a real release.
+      Optional prerelease suffix, appended as -<prerelease> (e.g. a build
+      number). Use for non-release builds so they can never collide with a
+      real release.
     required: false
     default: ''
   tag-prefix:
