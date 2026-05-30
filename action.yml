@@ -1,64 +1,76 @@
 name: Create version number
-description: Tag repository with next version number and return both the tag (e.g. v0.0.0-alpha.1) and the package version number (e.g. 0.0.0-alpha.1)
+description: >-
+  Compute the next semantic version from the latest Git tag, with the bump
+  level (major / minor / patch) driven by a label on the associated pull
+  request. Pure computation — it never creates a tag or release.
+
 inputs:
   token:
-    description: 'GitHub token'
-    required: true  
+    description: GitHub token, used to read pull-request labels.
+    required: true
   version:
-    description: 'Version number override'
+    description: >-
+      Explicit version override (e.g. 1.4.0 or v1.4.0). Used verbatim when set,
+      bypassing tag lookup and the label/bump logic.
+    required: false
+    default: ''
+  bump:
+    description: >-
+      Explicit bump level (major | minor | patch). Skips the PR-label lookup
+      when set. Useful for callers that decide the bump themselves.
+    required: false
+    default: ''
+  default-bump:
+    description: Bump level applied when no major/minor label is present.
+    required: false
+    default: patch
+  prerelease:
+    description: >-
+      Optional prerelease suffix, appended as -<prerelease> (e.g.
+      beta.${{ github.run_number }}). Use for non-release builds so they can
+      never collide with a real release.
+    required: false
+    default: ''
+  tag-prefix:
+    description: Tag prefix.
+    required: false
+    default: v
+  major-label:
+    description: PR label that selects a major bump.
+    required: false
+    default: major
+  minor-label:
+    description: PR label that selects a minor bump.
+    required: false
+    default: minor
+
 outputs:
-  tag: 
-    description: "Git tag"
-    value: ${{ steps.pick_version.outputs.tag }}
-  package: 
-    description: "Package version number"
-    value: ${{ steps.pick_version.outputs.package }}
+  tag:
+    description: Version tag, e.g. v1.4.0
+    value: ${{ steps.compute.outputs.tag }}
+  package:
+    description: Version number without the prefix, e.g. 1.4.0
+    value: ${{ steps.compute.outputs.package }}
+  bump:
+    description: The bump level applied (major | minor | patch | manual)
+    value: ${{ steps.compute.outputs.bump }}
+  previous-tag:
+    description: The tag the version was computed from (empty before the first release)
+    value: ${{ steps.compute.outputs.previous-tag }}
 
 runs:
-  using: "composite"
+  using: composite
   steps:
-  - name: Create version number
-    id: create_version_number
-    uses: anothrNick/github-tag-action@1.67.0
-    if: ${{ github.actor != 'dependabot[bot]' && inputs.version == '' }}
-    env:
-      GITHUB_TOKEN: ${{ inputs.token }}
-      WITH_V: true
-      DEFAULT_BUMP: patch
-      BRANCH_HISTORY: compare      
-      RELEASE_BRANCHES: main,master
-
-  - name: Pick version
-    id: pick_version
+  - name: Compute version
+    id: compute
     shell: bash
-    run: |
-      VALID_VERSION_REGEX="^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9]+\.[0-9]+)?$"
-      if [ "${{ github.actor }}" == "dependabot[bot]" ] ; then
-        VERSION=v0.0.1-dependabot.$(date '+%Y%m%d%H%M%S')
-      elif [ ! -z "${MANUAL_VERSION}" ] ; then
-        echo "User supplied version: ${MANUAL_VERSION}"
-        VERSION="${MANUAL_VERSION}"
-      elif [ ! -z "${TAG_VERSION}" ] ; then
-        echo "Tag bump generated version: ${TAG_VERSION}"
-        VERSION="${TAG_VERSION}"
-      else
-        echo "Neither manual or tag version set"
-        exit 1
-      fi
-      if [[ ${VERSION} =~ ${VALID_VERSION_REGEX} ]] && [ "${VERSION}" != "v0.0.0" ] ; then
-        echo "Version number is valid: ${VERSION}"
-        echo "::set-output name=tag::${VERSION}"
-        echo "::set-output name=package::${VERSION:1}"
-      else
-        echo "Version number is not valid ${VERSION}"
-        exit 1
-      fi
     env:
-      TAG_VERSION: ${{ steps.create_version_number.outputs.new_tag }}
-      MANUAL_VERSION: ${{ inputs.version }}        
-
-  - name: Echo version numbers
-    shell: bash
-    run: |
-      echo "tag version: ${{ steps.pick_version.outputs.tag }}"
-      echo "package version: ${{ steps.pick_version.outputs.package }}"
+      GH_TOKEN: ${{ inputs.token }}
+      INPUT_VERSION: ${{ inputs.version }}
+      INPUT_BUMP: ${{ inputs.bump }}
+      INPUT_DEFAULT_BUMP: ${{ inputs.default-bump }}
+      INPUT_PRERELEASE: ${{ inputs.prerelease }}
+      INPUT_TAG_PREFIX: ${{ inputs.tag-prefix }}
+      INPUT_MAJOR_LABEL: ${{ inputs.major-label }}
+      INPUT_MINOR_LABEL: ${{ inputs.minor-label }}
+    run: bash "${GITHUB_ACTION_PATH}/compute-version.sh"
