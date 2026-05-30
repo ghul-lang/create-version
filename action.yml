@@ -1,29 +1,25 @@
 name: Create version number
 description: >-
-  Compute the next semantic version from the latest Git tag, with the bump
-  level (major / minor / patch) driven by a label on the associated pull
-  request. Pure computation — it never creates a tag or release.
+  Compute the next semantic version from the latest Git tag and a checked-in
+  VERSION floor file. Patches come from the tag; a minor/major release is cut
+  by raising the (code-owned) VERSION file in a PR. Pure computation — no tags,
+  no GitHub API, no token.
 
 inputs:
-  token:
-    description: GitHub token, used to read pull-request labels.
-    required: true
   version:
     description: >-
       Explicit version override (e.g. 1.4.0 or v1.4.0). Used verbatim when set,
-      bypassing tag lookup and the label/bump logic.
+      bypassing the tag lookup and the VERSION floor.
     required: false
     default: ''
-  bump:
+  version-file:
     description: >-
-      Explicit bump level (major | minor | patch). Skips the PR-label lookup
-      when set. Useful for callers that decide the bump themselves.
+      Path to the VERSION floor file. When it holds a strict X.Y.Z that is
+      higher than the tag-derived patch bump, that version is used — this is
+      how a minor/major release is declared. Missing or non-semver content is
+      ignored (patch bump from the tag).
     required: false
-    default: ''
-  default-bump:
-    description: Bump level applied when no major/minor label is present.
-    required: false
-    default: patch
+    default: VERSION
   prerelease:
     description: >-
       Optional prerelease suffix, appended as -<prerelease> (e.g. a build
@@ -35,14 +31,6 @@ inputs:
     description: Tag prefix.
     required: false
     default: v
-  major-label:
-    description: PR label that selects a major bump.
-    required: false
-    default: major
-  minor-label:
-    description: PR label that selects a minor bump.
-    required: false
-    default: minor
 
 outputs:
   tag:
@@ -52,7 +40,7 @@ outputs:
     description: Version number without the prefix, e.g. 1.4.0
     value: ${{ steps.compute.outputs.package }}
   bump:
-    description: The bump level applied (major | minor | patch | manual)
+    description: The bump level relative to the previous release (major | minor | patch | manual)
     value: ${{ steps.compute.outputs.bump }}
   previous-tag:
     description: The tag the version was computed from (empty before the first release)
@@ -65,12 +53,8 @@ runs:
     id: compute
     shell: bash
     env:
-      GH_TOKEN: ${{ inputs.token }}
       INPUT_VERSION: ${{ inputs.version }}
-      INPUT_BUMP: ${{ inputs.bump }}
-      INPUT_DEFAULT_BUMP: ${{ inputs.default-bump }}
+      INPUT_VERSION_FILE: ${{ inputs.version-file }}
       INPUT_PRERELEASE: ${{ inputs.prerelease }}
       INPUT_TAG_PREFIX: ${{ inputs.tag-prefix }}
-      INPUT_MAJOR_LABEL: ${{ inputs.major-label }}
-      INPUT_MINOR_LABEL: ${{ inputs.minor-label }}
     run: bash "${GITHUB_ACTION_PATH}/compute-version.sh"

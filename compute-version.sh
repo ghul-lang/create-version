@@ -1,32 +1,44 @@
 #!/usr/bin/env bash
 #
-# Compute the next semantic version from the latest Git tag.
+# Compute the next semantic version from the latest Git tag and a checked-in
+# VERSION floor file.
 #
-# The bump level is, in order of precedence:
-#   1. the `version` input         — an explicit version, used verbatim;
-#   2. the `bump` input            — an explicit major|minor|patch level;
-#   3. a label on the associated PR — `major` / `minor` (configurable);
-#   4. the `default-bump` input    — used when no label is present.
+#   next = max( <latest vX.Y.Z tag> with patch+1 , <VERSION file> )
 #
-# Pure computation: this never creates a tag or a release. Tagging is the
-# caller's job (e.g. `gh release create`), which is what seeds the next run's
-# tag lookup.
+# Patches need nothing: with VERSION unchanged the tag drives a patch bump and
+# overtakes the floor, so it is self-correcting and never needs resetting. A
+# minor/major release is cut by raising the VERSION file to the target number
+# in a PR — and since VERSION is code-owned, that edit requires the code
+# owner's review. The bump level is thus gated by GitHub's native required
+# review, not by this action.
 #
-# Inputs arrive as INPUT_* environment variables (see action.yml). The script
-# also reads the standard GITHUB_* variables. It is runnable locally for
-# tests: when GITHUB_OUTPUT is unset the key=value lines go to stdout.
+# Pure computation: no tags created, no GitHub API, no token. Tagging is the
+# caller's job (e.g. `gh release create`), which seeds the next run.
+#
+# Inputs arrive as INPUT_* environment variables (see action.yml). Runnable
+# locally for tests: when GITHUB_OUTPUT is unset the key=value lines go to
+# stdout.
 
 set -euo pipefail
 
 prefix="${INPUT_TAG_PREFIX:-v}"
-default_bump="${INPUT_DEFAULT_BUMP:-patch}"
-major_label="${INPUT_MAJOR_LABEL:-major}"
-minor_label="${INPUT_MINOR_LABEL:-minor}"
+version_file="${INPUT_VERSION_FILE:-VERSION}"
 out="${GITHUB_OUTPUT:-/dev/stdout}"
 
 semver_re='^[0-9]+\.[0-9]+\.[0-9]+$'
 
-die() { echo "::error::$*" >&2; exit 1; }
+# Echo the larger of two X.Y.Z versions.
+semver_max() {
+  local -a A B
+  IFS=. read -r -a A <<< "$1"
+  IFS=. read -r -a B <<< "$2"
+  local i
+  for i in 0 1 2; do
+    if   (( ${A[i]:-0} > ${B[i]:-0} )); then echo "$1"; return; fi
+    if   (( ${A[i]:-0} < ${B[i]:-0} )); then echo "$2"; return; fi
+  done
+  echo "$1"
+}
 
 emit() {
   local tag="$1" package="$2" bump="$3" previous="$4"
@@ -68,46 +80,28 @@ while IFS= read -r ref; do
   fi
 done <<< "$tags"
 
-IFS=. read -r major minor patch <<< "$prev"
-
-# 3. Bump level: explicit input, else a label on the associated PR, else default.
-level="${INPUT_BUMP:-}"
-if [ -z "$level" ]; then
-  pr=""
-  case "${GITHUB_EVENT_NAME:-}" in
-    pull_request|pull_request_target)
-      pr="$(jq -r '.pull_request.number // empty' "${GITHUB_EVENT_PATH}")"
-      ;;
-    push)
-      # The squash-merge subject ends with "(#N)" under GitHub's default
-      # squash strategy; fall back to the commit→PR API if it is absent.
-      pr="$(git log -1 --format='%s' | grep -oE '\(#[0-9]+\)$' | tr -dc '0-9' || true)"
-      if [ -z "$pr" ]; then
-        pr="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
-                --jq 'first(.[].number) // empty' 2>/dev/null || true)"
-      fi
-      ;;
-  esac
-
-  level="$default_bump"
-  if [ -n "$pr" ]; then
-    labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${pr}/labels" \
-                --jq '.[].name' 2>/dev/null || true)"
-    if   grep -qxF "$major_label" <<< "$labels"; then level="major"
-    elif grep -qxF "$minor_label" <<< "$labels"; then level="minor"
-    fi
-  fi
+# 3. VERSION floor (optional). Ignored unless it is a strict X.Y.Z.
+floor="0.0.0"
+if [ -f "$version_file" ]; then
+  raw="$(tr -d '[:space:]' < "$version_file" || true)"
+  raw="${raw#"$prefix"}"
+  raw="${raw#v}"
+  [[ "$raw" =~ $semver_re ]] && floor="$raw"
 fi
 
-# 4. Apply the bump.
-case "$level" in
-  major) next="$((major + 1)).0.0" ;;
-  minor) next="${major}.$((minor + 1)).0" ;;
-  patch) next="${major}.${minor}.$((patch + 1))" ;;
-  *)     die "invalid bump level '${level}' (expected major, minor or patch)" ;;
-esac
+# 4. next = max(patch-bump of the latest tag, the floor).
+IFS=. read -r pmaj pmin ppat <<< "$prev"
+patch_candidate="${pmaj}.${pmin}.$((ppat + 1))"
+next="$(semver_max "$patch_candidate" "$floor")"
 
-# 5. Optional prerelease suffix (e.g. beta.17), for non-release builds.
+# 5. Classify the bump relative to the previous release, for reporting.
+IFS=. read -r nmaj nmin _ <<< "$next"
+if   (( nmaj > pmaj )); then level="major"
+elif (( nmin > pmin )); then level="minor"
+else level="patch"
+fi
+
+# 6. Optional prerelease suffix (e.g. a build number), for non-release builds.
 if [ -n "${INPUT_PRERELEASE:-}" ]; then
   next="${next}-${INPUT_PRERELEASE}"
 fi

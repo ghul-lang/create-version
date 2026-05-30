@@ -1,0 +1,6 @@
+# Own only release-sensitive paths — never a `*` catch-all, which would
+# require code-owner review on every PR. Pair with branch protection:
+# "Require review from Code Owners" + required approvals = 0.
+/VERSION              @degory
+/.github/workflows/   @degory
+/.github/CODEOWNERS   @degory
