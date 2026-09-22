@@ -32,7 +32,7 @@ no custom status check. See [Gating bumps](#gating-bumps-with-codeowners).
     fetch-depth: 0          # full history + tags, so the latest tag is visible
 
 - id: version
-  uses: degory/create-version@v1
+  uses: ghul-lang/create-version@v1
   with:
     # non-release builds get a prerelease suffix so they can never collide
     # with a real release:
