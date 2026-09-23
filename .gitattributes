@@ -1,0 +1,2 @@
+# Linguist won't recognize ghūl - stop it from claiming misleading things like 'top language Shell'
+* -linguist-detectable
